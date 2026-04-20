@@ -15,7 +15,8 @@ def compute_metrics(eval_pred):
     probs = 1 / (1 + np.exp(-logits))   # sigmoid
 
     # Convert probabilities to binary predictions
-    preds = (probs > 0.5).astype(int)
+    threshold = 0.4
+    preds = (probs > threshold).astype(int)
 
     # Metrics
     precision = precision_score(labels, preds, average="micro", zero_division=0)

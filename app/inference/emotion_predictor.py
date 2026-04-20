@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 class EmotionPredictor:
 
-    def __init__(self, model_path="models/emotion_classifier", threshold=0.30):
+    def __init__(self, model_path="models/emotion_classifier_v2", threshold=0.30):
 
         self.model_path = model_path
         self.threshold = threshold

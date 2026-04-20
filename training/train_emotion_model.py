@@ -81,15 +81,12 @@ class MultiLabelDataCollator(DataCollatorWithPadding):
 class WeightedTrainer(Trainer):
 
     def __init__(self, class_weights=None, *args, **kwargs):
-
         super().__init__(*args, **kwargs)
-
         self.class_weights = class_weights
 
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-
-        labels = inputs.pop("labels")
+        labels = inputs["labels"]
 
         outputs = model(**inputs)
 
@@ -102,8 +99,6 @@ class WeightedTrainer(Trainer):
         )
 
         return (loss, outputs) if return_outputs else loss
-
-
 # -----------------------------
 # Main training pipeline
 # -----------------------------
@@ -150,7 +145,7 @@ def main():
     train_dataset = Dataset.from_list(train_list)
 
     # -----------------------------
-    # Compute class weights
+    # Compute class weights 
     # -----------------------------
     class_weights = compute_class_weights(
         encoded_dataset["train"],
@@ -177,13 +172,13 @@ def main():
 
         output_dir="./models",
 
-        evaluation_strategy="epoch",
-        save_strategy="epoch",
-
+       
         learning_rate=2e-5,
 
         per_device_train_batch_size=16,
-        per_device_eval_batch_size=16,
+        per_device_eval_batch_size=16, 
+
+        
 
         num_train_epochs=5,
 
@@ -194,11 +189,8 @@ def main():
 
         fp16=torch.cuda.is_available(),
 
-        load_best_model_at_end=True,
-
-        metric_for_best_model="macro_f1",
-
-        greater_is_better=True
+        do_train=True,
+        do_eval=True
     )
 
     trainer = WeightedTrainer(
@@ -209,7 +201,7 @@ def main():
         train_dataset=train_dataset,
         eval_dataset=encoded_dataset["validation"],
 
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
 
         data_collator=MultiLabelDataCollator(tokenizer),
 
