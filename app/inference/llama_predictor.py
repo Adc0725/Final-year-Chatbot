@@ -9,7 +9,7 @@ class LlamaPredictor:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # Load model (IMPORTANT: Unsloth loader)
+        # Load model
         self.model, self.tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_path,
             max_seq_length=3048,
@@ -27,11 +27,13 @@ class LlamaPredictor:
     # -----------------------------------
     def clean_response(self, text):
 
-        text = re.sub(r"\s+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
 
-        # Remove unfinished endings
-        text = text.strip()
+        # Remove prompt leakage
+        if "### Response:" in text:
+            text = text.split("### Response:")[-1].strip()
 
+        # Ensure proper ending
         if not text.endswith((".", "!", "?")):
             text += "."
 
@@ -46,9 +48,9 @@ class LlamaPredictor:
         return ". ".join(seen).strip()
 
     # -----------------------------------
-    # Build prompt (LLAMA FORMAT)
+    # Build prompt (UPDATED WITH INTENT)
     # -----------------------------------
-    def build_prompt(self, user_input, primary_emotion,secondary_emotions=None):
+    def build_prompt(self, user_input, primary_emotion, secondary_emotions=None, intent="general"):
 
         history = ""
 
@@ -56,90 +58,116 @@ class LlamaPredictor:
             history += f"User: {turn['user']}\nAssistant: {turn['bot']}\n"
 
         # -----------------------------
-        # EMOTION-AWARE TONE
+        # EMOTION TONE
         # -----------------------------
         if primary_emotion == "joy":
-            tone = (
-                "Celebrate the user's positive feelings. Reinforce their happiness "
-                "and encourage them to continue positive behaviors."
-            )
+            tone = "Celebrate the user's positive feelings and reinforce happiness."
 
         elif primary_emotion == "sadness":
-            tone = (
-                "Be gentle, empathetic, and comforting. Acknowledge their feelings "
-                "and offer emotional support."
-            )
+            tone = "Be gentle, empathetic, and comforting."
 
         elif primary_emotion == "anxiety":
-            tone = (
-                "Be calming and reassuring. Help reduce worry and suggest grounding "
-                "or relaxation techniques."
-            )
+            tone = "Be calming and reassuring. Reduce worry."
 
         elif primary_emotion == "anger":
-            tone = (
-                "Remain calm and non-judgmental. Help the user process their anger "
-                "and guide them toward constructive coping strategies."
-            )
+            tone = "Remain calm and help the user process anger constructively."
 
+        else:
+            tone = "Be supportive, friendly, and conversational."
 
-        else:  # neutral
-            tone = (
-                "Be supportive, friendly, and conversational while maintaining "
-                "empathy and clarity."
-            ) 
-
-        
-        # SECONDARY EMOTION INFLUENCE
-        
+        # -----------------------------
+        # SECONDARY EMOTION
+        # -----------------------------
         secondary_tone = ""
 
         if secondary_emotions:
             if "anxiety" in secondary_emotions:
-                secondary_tone += " Also be slightly reassuring and reduce worry."
+                secondary_tone += " Add reassurance."
 
             if "sadness" in secondary_emotions:
-                secondary_tone += " Show deeper empathy and emotional validation."
+                secondary_tone += " Show deeper empathy."
 
             if "anger" in secondary_emotions:
-                secondary_tone += " Remain calm and avoid sounding confrontational."
+                secondary_tone += " Avoid confrontation."
 
-            
             if "joy" in secondary_emotions:
-                secondary_tone += " Reinforce positivity where appropriate."
+                secondary_tone += " Reinforce positivity."
 
-        
+        # -----------------------------
+        # INTENT CONTROL
+        # -----------------------------
+        if intent == "venting":
+            intent_instruction = (
+                "Let the user express themselves. Focus on listening and validating feelings."
+            )
+
+        elif intent == "seeking_advice":
+            intent_instruction = (
+                "Provide gentle and practical coping suggestions."
+            )
+
+        elif intent == "crisis":
+            intent_instruction = (
+                "Respond with urgency, empathy, and encourage seeking real-world help."
+            )
+
+        elif intent == "greeting":
+            intent_instruction = (
+                "Respond warmly and invite conversation."
+            )
+
+        else:
+            intent_instruction = (
+                "Provide a balanced supportive response."
+            )
+
+        # -----------------------------
         # FINAL PROMPT
-        
+        # -----------------------------
         prompt = f"""### Instruction:
-    You are a professional mental health support assistant.
+You are a mental health support assistant.
 
-    Your responses must:
-    - Be empathetic, supportive, and human-like
-    - Be clear and easy to understand
-    - Provide helpful guidance when appropriate
-    - Be moderately detailed (not too short, not overly long)
-    - Avoid repeating phrases or sounding robotic
+Rules:
+- Be empathetic and supportive
+- Do NOT provide medical or clinical advice
+- Do NOT encourage harmful behavior
+- Always complete your thoughts clearly
+- Keep responses natural and human-like (3–6 sentences)
 
-    {tone} 
-    {secondary_tone}
+Emotion Tone:
+{tone}
+{secondary_tone}
 
-    Conversation history:
-    {history}
+Intent Guidance:
+{intent_instruction}
 
-    User: {user_input}
+Conversation History:
+{history}
 
-    ### Response:
-    """
+User: {user_input}
+
+### Response:
+"""
 
         return prompt
 
-    
+    # -----------------------------------
     # Generate response
-    
-    def generate_response(self, user_input, primary_emotion="neutral", secondary_emotions=None):
+    # -----------------------------------
+    def generate_response(
+        self,
+        user_input,
+        primary_emotion="neutral",
+        secondary_emotions=None,
+        intent="general"
+    ):
 
-        prompt = self.build_prompt(user_input, primary_emotion,secondary_emotions)
+        prompt = self.build_prompt(
+            user_input,
+            primary_emotion,
+            secondary_emotions,
+            intent
+        )
 
         inputs = self.tokenizer(
             prompt,
@@ -147,25 +175,35 @@ class LlamaPredictor:
             truncation=True,
             max_length=3048
         )
+
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         outputs = self.model.generate(
-            input_ids=inputs["input_ids"], 
-            attention_mask=inputs["attention_mask"],  
-            max_new_tokens=150,
+            input_ids=inputs["input_ids"],
+            attention_mask=inputs["attention_mask"],
+            max_new_tokens=180,
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
-            repetition_penalty=1.2,
+            repetition_penalty=1.15,
         )
 
         decoded = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-        # Extract only response
-        response = decoded.split("### Response:")[-1].strip()
-        response = self.clean_response(response)
+        response = self.clean_response(decoded)
 
-        # Save memory
+        # -----------------------------
+        # FALLBACK FOR BROKEN OUTPUTS
+        # -----------------------------
+        if len(response.split()) < 5:
+            response = (
+                "I'm really sorry you're feeling this way. "
+                "Do you want to talk more about what's been going on?"
+            )
+
+        # -----------------------------
+        # SAVE MEMORY
+        # -----------------------------
         self.chat_history.append({
             "user": user_input,
             "bot": response

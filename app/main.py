@@ -3,7 +3,7 @@ from inference.response_generator import ResponseGenerator
 
 def main():
 
-    print("\n=== Mental Health Chatbot (Gemini Powered) ===")
+    print("\n=== Mental Health Chatbot (LLaMA Powered) ===")
     print("Type 'exit' or 'quit' to end the conversation.\n")
 
     bot = ResponseGenerator()
@@ -22,14 +22,24 @@ def main():
 
             result = bot.generate(user_input)
 
+            # -----------------------------
+            # ANALYSIS OUTPUT
+            # -----------------------------
             print("\n--- Analysis ---")
-            print(f"Emotion : {result['emotion']}")
-            print(f"Intent  : {result['intent']}")
+            print(f"Primary Emotion : {result['emotion']}")
 
-            # Optional (only if you included entities in return)
-            if "entities" in result:
-                print(f"Entities: {result['entities']}")
+            # Secondary emotions (NEW)
+            secondary = result.get("secondary_emotions", [])
+            if secondary:
+                print(f"Secondary Emotions : {', '.join(secondary)}")
+            else:
+                print("Secondary Emotions : None")
 
+            print(f"Intent : {result['intent']}")
+
+            # -----------------------------
+            # RESPONSE OUTPUT
+            # -----------------------------
             print("\n--- Response ---")
             print(f"{result['response']}\n")
 
@@ -44,4 +54,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
+
+
+
+
+
+
+
