@@ -19,9 +19,9 @@ from preprocessing import preprocess_dataset, load_label_schema
 
 
 # -----------------------------
-# Load model
+# Load model 
 # -----------------------------
-MODEL_PATH = "models/emotion_classifier_v2"
+MODEL_PATH = "models/emotion_classifier_v6"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -38,12 +38,15 @@ model.eval()
 dataset = load_go_emotions()
 encoded_dataset = preprocess_dataset(dataset, tokenizer)
 
-encoded_dataset.set_format(
+#  Use validation set (consistent + stable)
+test_dataset = encoded_dataset["validation"]
+
+#  IMPORTANT FIX: convert to torch tensors
+test_dataset.set_format(
     type="torch",
     columns=["input_ids", "attention_mask", "labels"]
 )
 
-val_dataset = encoded_dataset["validation"]
 label_schema = load_label_schema()
 
 
@@ -56,7 +59,7 @@ all_labels = []
 
 with torch.no_grad():
 
-    for batch in val_dataset:
+    for batch in test_dataset:
 
         input_ids = batch["input_ids"].unsqueeze(0).to(device)
         attention_mask = batch["attention_mask"].unsqueeze(0).to(device)
@@ -67,18 +70,24 @@ with torch.no_grad():
         )
 
         logits = outputs.logits.cpu().numpy()
-        probs = 1 / (1 + np.exp(-logits))  # sigmoid
 
-        preds = (probs > 0.4).astype(int)  # improved threshold
+        # Sigmoid for multi-label
+        probs = 1 / (1 + np.exp(-logits))
+
+        #  Tune this threshold if needed
+        preds = (probs >= 0.4).astype(int)
 
         all_probs.append(probs[0])
         all_preds.append(preds[0])
-        all_labels.append(batch["labels"].numpy())
+        all_labels.append(batch["labels"].cpu().numpy())
 
 
 all_probs = np.array(all_probs)
 all_preds = np.array(all_preds)
 all_labels = np.array(all_labels)
+
+# ✅ Convert soft labels → binary
+all_labels = (all_labels > 0).astype(int)
 
 
 # -----------------------------
@@ -86,8 +95,11 @@ all_labels = np.array(all_labels)
 # -----------------------------
 precision = precision_score(all_labels, all_preds, average="micro", zero_division=0)
 recall = recall_score(all_labels, all_preds, average="micro", zero_division=0)
+
 micro_f1 = f1_score(all_labels, all_preds, average="micro", zero_division=0)
 macro_f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
+weighted_f1 = f1_score(all_labels, all_preds, average="weighted", zero_division=0)
+
 hamming = hamming_loss(all_labels, all_preds)
 
 print("\nEvaluation Results:\n")
@@ -95,15 +107,20 @@ print(f"Precision: {precision:.4f}")
 print(f"Recall: {recall:.4f}")
 print(f"Micro F1: {micro_f1:.4f}")
 print(f"Macro F1: {macro_f1:.4f}")
+print(f"Weighted F1: {weighted_f1:.4f}")
 print(f"Hamming Loss: {hamming:.4f}")
 
 
 # -----------------------------
-# Confusion Matrix
+# Confusion Matrix (per label)
 # -----------------------------
 print("\nGenerating confusion matrices...\n")
 
 for i, label in enumerate(label_schema):
+
+    if len(np.unique(all_labels[:, i])) < 2:
+        print(f"Skipping {label} (only one class present)")
+        continue
 
     cm = confusion_matrix(
         all_labels[:, i],
@@ -119,9 +136,9 @@ for i, label in enumerate(label_schema):
 
 
 # -----------------------------
-# ROC Curves (NEW)
+# ROC Curves
 # -----------------------------
-print("\nGenerating combined ROC curve...\n")
+print("\nGenerating ROC curves...\n")
 
 plt.figure()
 
@@ -130,7 +147,6 @@ for i, label in enumerate(label_schema):
     y_true = all_labels[:, i]
     y_score = all_probs[:, i]
 
-    # Skip if only one class present
     if len(np.unique(y_true)) < 2:
         print(f"Skipping {label} (only one class present)")
         continue
@@ -144,7 +160,7 @@ for i, label in enumerate(label_schema):
         label=f"{label} (AUC = {roc_auc:.2f})"
     )
 
-# Diagonal reference line
+# Reference line
 plt.plot([0, 1], [0, 1], linestyle="--")
 
 plt.xlabel("False Positive Rate")
@@ -156,3 +172,5 @@ plt.grid()
 
 plt.savefig("roc_curve_all_emotions.png")
 plt.close()
+
+print("Saved ROC curve -> roc_curve_all_emotions.png")

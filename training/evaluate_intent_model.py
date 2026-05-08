@@ -1,25 +1,42 @@
+import json
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 from datasets import Dataset
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification
+)
 
 from sklearn.metrics import (
     confusion_matrix,
-    classification_report,
+    ConfusionMatrixDisplay,
     roc_curve,
-    auc
+    auc,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score
 )
+
 from sklearn.preprocessing import label_binarize
-import json
+
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+MODEL_PATH = "models/intent_classifier_v4"
+DATASET_PATH = "intent_dataset_v5.json"
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # -----------------------------
 # Load dataset
 # -----------------------------
-def load_dataset(path="intent_dataset.json"):
+def load_dataset(path=DATASET_PATH):
 
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -28,10 +45,18 @@ def load_dataset(path="intent_dataset.json"):
     labels = [d["label"] for d in data]
 
     label_list = sorted(list(set(labels)))
-    label2id = {l: i for i, l in enumerate(label_list)}
-    id2label = {i: l for l, i in label2id.items()}
 
-    encoded_labels = [label2id[l] for l in labels]
+    label2id = {
+        label: i for i, label in enumerate(label_list)
+    }
+
+    id2label = {
+        i: label for label, i in label2id.items()
+    }
+
+    encoded_labels = [
+        label2id[label] for label in labels
+    ]
 
     dataset = Dataset.from_dict({
         "text": texts,
@@ -50,71 +75,227 @@ def predict(model, tokenizer, dataset, device):
     all_probs = []
     all_labels = []
 
-    for sample in dataset:
+    model.eval()
 
-        inputs = tokenizer(
-            sample["text"],
-            return_tensors="pt",
-            truncation=True,
-            padding=True,
-            max_length=128
-        )
+    with torch.no_grad():
 
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        for sample in dataset:
 
-        with torch.no_grad():
+            inputs = tokenizer(
+                sample["text"],
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=128
+            )
+
+            inputs = {
+                k: v.to(device)
+                for k, v in inputs.items()
+            }
+
             outputs = model(**inputs)
 
-        logits = outputs.logits
-        probs = torch.softmax(logits, dim=1)
+            logits = outputs.logits
 
-        all_probs.append(probs.cpu().numpy()[0])
-        all_preds.append(np.argmax(probs.cpu().numpy()))
-        all_labels.append(sample["label"])
+            probs = torch.softmax(logits, dim=1)
 
-    return np.array(all_preds), np.array(all_probs), np.array(all_labels)
+            pred = torch.argmax(probs, dim=1)
 
+            all_probs.append(
+                probs.cpu().numpy()[0]
+            )
 
-# -----------------------------
-# Confusion Matrix
-# -----------------------------
-def plot_confusion_matrix(labels, preds, label_names):
+            all_preds.append(
+                pred.cpu().numpy()[0]
+            )
 
-    cm = confusion_matrix(labels, preds)
+            all_labels.append(
+                sample["label"]
+            )
 
-    plt.figure()
-    sns.heatmap(cm, annot=True, fmt="d",
-                xticklabels=label_names,
-                yticklabels=label_names)
-
-    plt.xlabel("Predicted")
-    plt.ylabel("Actual")
-    plt.title("Intent Confusion Matrix")
-    plt.show()
+    return (
+        np.array(all_preds),
+        np.array(all_probs),
+        np.array(all_labels)
+    )
 
 
 # -----------------------------
-# ROC Curve (ALL ON ONE GRAPH)
+# Overall Metrics
 # -----------------------------
-def plot_roc(all_labels, all_probs, label_names):
+def compute_metrics(labels, preds):
 
-    binarized = label_binarize(all_labels, classes=list(range(len(label_names))))
+    accuracy = accuracy_score(labels, preds)
+
+    precision_macro = precision_score(
+        labels,
+        preds,
+        average="macro",
+        zero_division=0
+    )
+
+    recall_macro = recall_score(
+        labels,
+        preds,
+        average="macro",
+        zero_division=0
+    )
+
+    macro_f1 = f1_score(
+        labels,
+        preds,
+        average="macro",
+        zero_division=0
+    )
+
+    precision_weighted = precision_score(
+        labels,
+        preds,
+        average="weighted",
+        zero_division=0
+    )
+
+    recall_weighted = recall_score(
+        labels,
+        preds,
+        average="weighted",
+        zero_division=0
+    )
+
+    weighted_f1 = f1_score(
+        labels,
+        preds,
+        average="weighted",
+        zero_division=0
+    )
+
+    print("\n==============================")
+    print("Overall Evaluation Metrics")
+    print("==============================\n")
+
+    print(f"Accuracy: {accuracy:.4f}")
+
+    print("\n--- Macro Metrics ---")
+    print(f"Precision: {precision_macro:.4f}")
+    print(f"Recall:    {recall_macro:.4f}")
+    print(f"F1 Score:  {macro_f1:.4f}")
+
+    print("\n--- Weighted Metrics ---")
+    print(f"Precision: {precision_weighted:.4f}")
+    print(f"Recall:    {recall_weighted:.4f}")
+    print(f"F1 Score:  {weighted_f1:.4f}")
+
+
+# -----------------------------
+# Confusion Matrix PER LABEL
+# -----------------------------
+def generate_per_label_confusion_matrices(
+    labels,
+    preds,
+    label_names
+):
+
+    print("\nGenerating per-label confusion matrices...\n")
+
+    binarized_labels = label_binarize(
+        labels,
+        classes=list(range(len(label_names)))
+    )
+
+    binarized_preds = label_binarize(
+        preds,
+        classes=list(range(len(label_names)))
+    )
+
+    for i, label in enumerate(label_names):
+
+        y_true = binarized_labels[:, i]
+        y_pred = binarized_preds[:, i]
+
+        if len(np.unique(y_true)) < 2:
+            print(f"Skipping {label} (only one class present)")
+            continue
+
+        cm = confusion_matrix(y_true, y_pred)
+
+        disp = ConfusionMatrixDisplay(
+            confusion_matrix=cm
+        )
+
+        disp.plot()
+
+        plt.title(f"Confusion Matrix - {label}")
+
+        plt.savefig(
+            f"intent_confusion_matrix_{label}.png"
+        )
+
+        plt.close()
+
+    print("Saved all per-label confusion matrices.")
+
+
+# -----------------------------
+# ROC Curves
+# -----------------------------
+def plot_roc_curves(
+    all_labels,
+    all_probs,
+    label_names
+):
+
+    print("\nGenerating ROC curves...\n")
+
+    binarized = label_binarize(
+        all_labels,
+        classes=list(range(len(label_names)))
+    )
 
     plt.figure()
 
     for i in range(len(label_names)):
-        fpr, tpr, _ = roc_curve(binarized[:, i], all_probs[:, i])
+
+        y_true = binarized[:, i]
+        y_score = all_probs[:, i]
+
+        if len(np.unique(y_true)) < 2:
+            print(f"Skipping {label_names[i]}")
+            continue
+
+        fpr, tpr, _ = roc_curve(
+            y_true,
+            y_score
+        )
+
         roc_auc = auc(fpr, tpr)
 
-        plt.plot(fpr, tpr, label=f"{label_names[i]} (AUC={roc_auc:.2f})")
+        plt.plot(
+            fpr,
+            tpr,
+            label=f"{label_names[i]} (AUC = {roc_auc:.2f})"
+        )
 
-    plt.plot([0, 1], [0, 1], linestyle="--")
+    plt.plot(
+        [0, 1],
+        [0, 1],
+        linestyle="--"
+    )
 
     plt.xlabel("False Positive Rate")
     plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve (All Intents)")
-    plt.legend()
-    plt.show()
+
+    plt.title("ROC Curves for All Intents")
+
+    plt.legend(loc="lower right")
+
+    plt.grid()
+
+    plt.savefig("intent_roc_curves.png")
+
+    plt.close()
+
+    print("Saved ROC curve -> intent_roc_curves.png")
 
 
 # -----------------------------
@@ -122,24 +303,63 @@ def plot_roc(all_labels, all_probs, label_names):
 # -----------------------------
 def main():
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Using device:", device)
 
+    # Load dataset
     dataset, label_names, label2id, id2label = load_dataset()
 
-    tokenizer = AutoTokenizer.from_pretrained("models/intent_classifier")
-    model = AutoModelForSequenceClassification.from_pretrained("models/intent_classifier")
+    # Load tokenizer/model
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+
+    model = AutoModelForSequenceClassification.from_pretrained(
+        MODEL_PATH
+    )
 
     model.to(device)
-    model.eval()
 
-    preds, probs, labels = predict(model, tokenizer, dataset, device)
+    # Predict
+    preds, probs, labels = predict(
+        model,
+        tokenizer,
+        dataset,
+        device
+    )
 
-    print("\nClassification Report:\n")
-    print(classification_report(labels, preds, target_names=label_names))
+    # Overall metrics
+    compute_metrics(labels, preds)
 
-    plot_confusion_matrix(labels, preds, label_names)
-    plot_roc(labels, probs, label_names)
+    # Classification report
+    from sklearn.metrics import classification_report
+
+    print("\n==============================")
+    print("Classification Report")
+    print("==============================\n")
+
+    print(
+        classification_report(
+            labels,
+            preds,
+            target_names=label_names
+        )
+    )
+
+    # Per-label confusion matrices
+    generate_per_label_confusion_matrices(
+        labels,
+        preds,
+        label_names
+    )
+
+    # ROC curves
+    plot_roc_curves(
+        labels,
+        probs,
+        label_names
+    )
 
 
+# -----------------------------
+# RUN
+# -----------------------------
 if __name__ == "__main__":
     main()

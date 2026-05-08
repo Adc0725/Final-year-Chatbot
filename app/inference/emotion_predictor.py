@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 class EmotionPredictor:
 
-    def __init__(self, model_path="models/emotion_classifier_v2", threshold=0.40):
+    def __init__(self, model_path="models/emotion_classifier_v6", threshold=0.30):
 
         self.model_path = model_path
         self.threshold = threshold
@@ -75,25 +75,6 @@ class EmotionPredictor:
                     "confidence": float(probs[max_index])
                 }
             )
-
-        # -----------------------------
-        # REMOVE NEUTRAL IF OTHERS EXIST
-        # -----------------------------
-        if len(predicted_emotions) > 1:
-            predicted_emotions = [
-                e for e in predicted_emotions
-                if e["emotion"] != "neutral"
-            ]
-
-            # Edge case safety
-            if len(predicted_emotions) == 0:
-                max_index = probs.argmax()
-                predicted_emotions.append(
-                    {
-                        "emotion": self.id2label[max_index],
-                        "confidence": float(probs[max_index])
-                    }
-                )
 
         # -----------------------------
         # SORT + LIMIT

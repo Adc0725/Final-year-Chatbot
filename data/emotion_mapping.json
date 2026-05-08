@@ -5,18 +5,18 @@
   "caring": "joy",
   "excitement": "joy",
   "gratitude": "joy",
-  "love": "joy",
+  "love": "joy",  
   "optimism": "joy",
   "pride": "joy",
   "relief": "joy",
 
-  "sadness": "sadness",
+  "sadness": "sadness", 
   "grief": "sadness",
   "remorse": "sadness",
   "disappointment": "sadness", 
   "embarrassment": "sadness", 
 
-  "nervousness": "anxiety",
+  "nervousness": "anxiety", 
   "fear": "anxiety", 
 
   "anger": "anger",
@@ -24,8 +24,6 @@
   "disapproval": "anger",
   "frustration": "anger",
   
-
-
   "realization": "neutral",
   "neutral": "neutral", 
   "confusion": "neutral"

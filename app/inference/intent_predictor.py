@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 class IntentPredictor:
 
-    def __init__(self, model_path="models/intent_classifier"):
+    def __init__(self, model_path="models/intent_classifier_v4"):
 
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
