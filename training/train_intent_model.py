@@ -6,7 +6,13 @@ import matplotlib.pyplot as plt
 from datasets import Dataset, DatasetDict
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score, roc_auc_score
+from sklearn.metrics import (
+    precision_score,
+    recall_score,
+    f1_score,
+    accuracy_score,
+    roc_auc_score
+)
 
 from transformers import (
     AutoTokenizer,
@@ -18,12 +24,13 @@ from transformers import (
     EarlyStoppingCallback
 )
 
+
 # -----------------------------
 # LOAD DATA
 # -----------------------------
 def load_dataset(path="intent_dataset_v5.json"):
 
-    with open(path, "r", encoding = "utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     texts = [item["text"] for item in data]
@@ -38,13 +45,29 @@ def load_dataset(path="intent_dataset_v5.json"):
 def compute_metrics(eval_pred):
 
     logits, labels = eval_pred
+
     preds = np.argmax(logits, axis=1)
 
     return {
         "accuracy": accuracy_score(labels, preds),
-        "precision": precision_score(labels, preds, average="weighted", zero_division=0),
-        "recall": recall_score(labels, preds, average="weighted", zero_division=0),
-        "f1": f1_score(labels, preds, average="weighted", zero_division=0)
+        "precision": precision_score(
+            labels,
+            preds,
+            average="weighted",
+            zero_division=0
+        ),
+        "recall": recall_score(
+            labels,
+            preds,
+            average="weighted",
+            zero_division=0
+        ),
+        "f1": f1_score(
+            labels,
+            preds,
+            average="weighted",
+            zero_division=0
+        )
     }
 
 
@@ -54,6 +77,7 @@ def compute_metrics(eval_pred):
 class LossTrackerCallback(TrainerCallback):
 
     def __init__(self):
+
         self.train_losses = []
         self.eval_losses = []
 
@@ -70,19 +94,29 @@ class LossTrackerCallback(TrainerCallback):
 
 
 # -----------------------------
-# TRAIN FUNCTION (FIXED LABELS)
+# TRAIN FUNCTION
 # -----------------------------
-def train_model(train_dataset, val_dataset, num_labels, id2label, label2id):
+def train_model(
+    train_dataset,
+    val_dataset,
+    num_labels,
+    id2label,
+    label2id
+):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
 
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "distilbert-base-uncased"
+    )
 
     model = AutoModelForSequenceClassification.from_pretrained(
         "distilbert-base-uncased",
         num_labels=num_labels,
-        id2label=id2label,     # ✅ FIX
-        label2id=label2id      # ✅ FIX
+        id2label=id2label,
+        label2id=label2id
     )
 
     model.to(device)
@@ -94,18 +128,13 @@ def train_model(train_dataset, val_dataset, num_labels, id2label, label2id):
         per_device_eval_batch_size=16,
         num_train_epochs=10,
         weight_decay=0.01,
-
         evaluation_strategy="steps",
         eval_steps=100,
-
         save_strategy="steps",
         save_steps=100,
-
         load_best_model_at_end=True,
-
         logging_dir="./logs",
         logging_steps=50,
-
         fp16=torch.cuda.is_available()
     )
 
@@ -119,7 +148,9 @@ def train_model(train_dataset, val_dataset, num_labels, id2label, label2id):
         data_collator=DataCollatorWithPadding(tokenizer),
         compute_metrics=compute_metrics,
         callbacks=[
-            EarlyStoppingCallback(early_stopping_patience=2),
+            EarlyStoppingCallback(
+                early_stopping_patience=2
+            ),
             loss_tracker
         ]
     )
@@ -140,43 +171,67 @@ def compute_roc_auc(model, dataset, device, num_labels):
     all_labels = []
 
     with torch.no_grad():
+
         for batch in dataset:
 
             input_ids = batch["input_ids"].unsqueeze(0).to(device)
+
             attention_mask = batch["attention_mask"].unsqueeze(0).to(device)
 
-            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            )
 
-            probs = torch.softmax(outputs.logits, dim=1).cpu().numpy()[0]
+            probs = torch.softmax(
+                outputs.logits,
+                dim=1
+            ).cpu().numpy()[0]
 
             all_probs.append(probs)
+
             all_labels.append(batch["label"].item())
 
     all_probs = np.array(all_probs)
+
     all_labels = np.array(all_labels)
 
     one_hot_labels = np.eye(num_labels)[all_labels]
 
-    return roc_auc_score(one_hot_labels, all_probs, average="weighted", multi_class="ovr")
+    return roc_auc_score(
+        one_hot_labels,
+        all_probs,
+        average="weighted",
+        multi_class="ovr"
+    )
 
 
 # -----------------------------
 # LEARNING CURVE
 # -----------------------------
-def learning_curve_pipeline(dataset, num_labels, id2label, label2id):
+def learning_curve_pipeline(
+    dataset,
+    num_labels,
+    id2label,
+    label2id
+):
 
     TRAIN_SIZES = [100, 300, 600, 1000, 2000]
 
     train_scores = []
     val_scores = []
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
 
     for size in TRAIN_SIZES:
 
         print(f"\nTraining with {size} samples...")
 
-        subset = dataset["train"].select(range(min(size, len(dataset["train"]))))
+        subset = dataset["train"].select(
+            range(min(size, len(dataset["train"])))
+        )
 
         model, _, _, _ = train_model(
             subset,
@@ -186,8 +241,19 @@ def learning_curve_pipeline(dataset, num_labels, id2label, label2id):
             label2id
         )
 
-        train_auc = compute_roc_auc(model, subset, device, num_labels)
-        val_auc = compute_roc_auc(model, dataset["validation"], device, num_labels)
+        train_auc = compute_roc_auc(
+            model,
+            subset,
+            device,
+            num_labels
+        )
+
+        val_auc = compute_roc_auc(
+            model,
+            dataset["validation"],
+            device,
+            num_labels
+        )
 
         train_scores.append(train_auc)
         val_scores.append(val_auc)
@@ -218,40 +284,78 @@ def main():
     texts, labels = load_dataset()
 
     le = LabelEncoder()
+
     labels_encoded = le.fit_transform(labels)
 
-    #  CREATE LABEL MAPPINGS
-    label2id = {label: i for i, label in enumerate(le.classes_)}
-    id2label = {i: label for label, i in label2id.items()}
+    label2id = {
+        label: i
+        for i, label in enumerate(le.classes_)
+    }
+
+    id2label = {
+        i: label
+        for label, i in label2id.items()
+    }
 
     num_labels = len(label2id)
 
-    # SPLIT
     X_train, X_temp, y_train, y_temp = train_test_split(
-        texts, labels_encoded, test_size=0.2, stratify=labels_encoded, random_state=42
+        texts,
+        labels_encoded,
+        test_size=0.2,
+        stratify=labels_encoded,
+        random_state=42
     )
 
     X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=42
+        X_temp,
+        y_temp,
+        test_size=0.5,
+        stratify=y_temp,
+        random_state=42
     )
 
-    tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained(
+        "distilbert-base-uncased"
+    )
 
     def tokenize(example):
-        return tokenizer(example["text"], truncation=True, padding="max_length", max_length=64)
+
+        return tokenizer(
+            example["text"],
+            truncation=True,
+            padding="max_length",
+            max_length=64
+        )
 
     dataset = DatasetDict({
-        "train": Dataset.from_dict({"text": X_train, "label": y_train}),
-        "validation": Dataset.from_dict({"text": X_val, "label": y_val}),
-        "test": Dataset.from_dict({"text": X_test, "label": y_test})
+        "train": Dataset.from_dict({
+            "text": X_train,
+            "label": y_train
+        }),
+        "validation": Dataset.from_dict({
+            "text": X_val,
+            "label": y_val
+        }),
+        "test": Dataset.from_dict({
+            "text": X_test,
+            "label": y_test
+        })
     })
 
     dataset = dataset.map(tokenize)
 
     for split in dataset:
-        dataset[split].set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
 
-    # TRAIN
+        dataset[split].set_format(
+            type="torch",
+            columns=[
+                "input_ids",
+                "attention_mask",
+                "label"
+            ]
+        )
+
     model, tokenizer, trainer, loss_tracker = train_model(
         dataset["train"],
         dataset["validation"],
@@ -260,38 +364,69 @@ def main():
         label2id
     )
 
-    # TEST EVAL
     print("\nFinal TEST evaluation:")
+
     print(trainer.evaluate(dataset["test"]))
 
-    # SAVE
     SAVE_PATH = "models/intent_classifier_v4"
 
     model.save_pretrained(SAVE_PATH)
+
     tokenizer.save_pretrained(SAVE_PATH)
 
-    # 🔥 SAVE LABEL MAPPING (VERY IMPORTANT)
     with open(f"{SAVE_PATH}/label_mapping.json", "w") as f:
-        json.dump({"id2label": id2label, "label2id": label2id}, f, indent=2)
+
+        json.dump({
+            "id2label": id2label,
+            "label2id": label2id
+        }, f, indent=2)
 
     print(f"\nModel saved to {SAVE_PATH}")
 
-    # LOSS CURVE
+    # -----------------------------
+    # COMBINED LOSS CURVE
+    # -----------------------------
     plt.figure()
+
     plt.plot(loss_tracker.train_losses, label="Train Loss")
     plt.plot(loss_tracker.eval_losses, label="Validation Loss")
+
     plt.xlabel("Steps")
     plt.ylabel("Loss")
-    plt.title("Training Curve")
+    plt.title("Training Loss")
+
     plt.legend()
     plt.grid()
-    plt.savefig("intent_loss_curve.png")
+
+    plt.savefig("intent_loss_curve_combined.png")
     plt.close()
 
-    print("Saved loss curve -> intent_loss_curve.png")
+    print("Saved combined loss curve -> intent_loss_curve_combined.png")
 
-    # LEARNING CURVE
-    learning_curve_pipeline(dataset, num_labels, id2label, label2id)
+    # -----------------------------
+    # TRAIN LOSS ONLY CURVE
+    # -----------------------------
+    plt.figure()
+
+    plt.plot(loss_tracker.train_losses)
+
+    plt.xlabel("Steps")
+    plt.ylabel("Loss")
+    plt.title("Training Loss Only")
+
+    plt.grid()
+
+    plt.savefig("intent_train_loss_only.png")
+    plt.close()
+
+    print("Saved training-only loss curve -> intent_train_loss_only.png")
+
+    learning_curve_pipeline(
+        dataset,
+        num_labels,
+        id2label,
+        label2id
+    )
 
 
 if __name__ == "__main__":

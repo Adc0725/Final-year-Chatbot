@@ -9,6 +9,7 @@ from inference.intent_predictor import IntentPredictor
 from inference.llama_predictor import LlamaPredictor
 from inference.safety_filter import SafetyFilter
 from inference.response_cleaner import ResponseCleaner
+from inference.personalization_engine import PersonalizationEngine
 
 
 # Load environment variables
@@ -33,6 +34,7 @@ class ResponseGenerator:
         # LOAD MODELS
         # -----------------------------
         self.emotion_model = EmotionPredictor()
+
         self.intent_model = IntentPredictor()
 
         self.dialog_model = LlamaPredictor(
@@ -40,7 +42,10 @@ class ResponseGenerator:
         )
 
         self.safety_filter = SafetyFilter()
+
         self.cleaner = ResponseCleaner()
+
+        self.personalization_engine = PersonalizationEngine()
 
         # -----------------------------
         # LOAD COPING STRATEGIES
@@ -57,9 +62,24 @@ class ResponseGenerator:
     def generate(self, user_input):
 
         # -----------------------------
+        # 0. INPUT SAFETY CHECK
+        # -----------------------------
+        safety_result = self.safety_filter.check_input(user_input)
+
+        if safety_result:
+            return {
+                "emotion": "crisis",
+                "secondary_emotions": [],
+                "intent": "crisis",
+                "response": safety_result
+            }
+
+        # -----------------------------
         # 1. EMOTION DETECTION
         # -----------------------------
-        emotions = self.emotion_model.predict_emotions(user_input)
+        emotions = self.emotion_model.predict_emotions(
+            user_input
+        )
 
         if emotions:
 
@@ -72,12 +92,14 @@ class ResponseGenerator:
             primary_emotion = sorted_emotions[0]["emotion"]
 
             secondary_emotions = [
-                e["emotion"] for e in sorted_emotions[1:3]
+                e["emotion"]
+                for e in sorted_emotions[1:3]
             ]
 
         else:
 
             primary_emotion = "neutral"
+
             secondary_emotions = []
 
         # -----------------------------
@@ -90,22 +112,40 @@ class ResponseGenerator:
         intent = intent_result["intent"]
 
         # -----------------------------
-        # 3. GENERATE RESPONSE
+        # 3. PERSONALIZATION UPDATE
+        # -----------------------------
+        self.personalization_engine.update_profile(
+            user_input,
+            primary_emotion
+        )
+
+        personalization_context = (
+            self.personalization_engine.get_personalization_context()
+        )
+
+        # -----------------------------
+        # 4. GENERATE RESPONSE
         # -----------------------------
         response = self.dialog_model.generate_response(
             user_input=user_input,
             primary_emotion=primary_emotion,
             secondary_emotions=secondary_emotions,
-            intent=intent
+            intent=intent,
+            personalization_context=personalization_context
         )
 
         # -----------------------------
-        # 4. ADD COPING STRATEGY
+        # 5. ADD COPING STRATEGY
         # -----------------------------
-        if primary_emotion in self.coping_strategies:
+        if (
+            primary_emotion in self.coping_strategies
+            and self.coping_strategies[primary_emotion]
+        ):
 
-            strategy = random.choice(
-                self.coping_strategies[primary_emotion]
+            strategy = (
+                self.personalization_engine.get_new_strategy(
+                    self.coping_strategies[primary_emotion]
+                )
             )
 
             response += (
@@ -113,7 +153,7 @@ class ResponseGenerator:
             )
 
         # -----------------------------
-        # 5. SAFETY FILTER
+        # 6. OUTPUT SAFETY FILTER
         # -----------------------------
         response = self.safety_filter.filter_response(
             user_input,
@@ -121,7 +161,7 @@ class ResponseGenerator:
         )
 
         # -----------------------------
-        # 6. CLEAN RESPONSE
+        # 7. CLEAN RESPONSE
         # -----------------------------
         response = self.cleaner.clean(response)
 

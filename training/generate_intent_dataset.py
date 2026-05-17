@@ -13,7 +13,7 @@ from urllib3.util.retry import Retry
 # CONFIG
 # =========================================================
 
-API_KEY = "[YOUR_API_KEY]"
+API_KEY = "p0nXuQJ4M5rMD25axIt0vjvjXbj7e0Wh"
 
 MODEL = "mistral-small"
 
